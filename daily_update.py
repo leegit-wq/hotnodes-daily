@@ -1,30 +1,45 @@
-import json, asyncio, aiohttp, time, base64, re
+import json, asyncio, aiohttp, base64, re
 from datetime import datetime
 
+# 📥 节点源列表（支持 base64 或明文）
 SOURCE_URLS = [
     "https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/sub/splitted/vmess",
     "https://raw.githubusercontent.com/Leon406/SubCrawler/main/sub/ProxyNode_Subscribe_1.txt",
     "https://raw.githubusercontent.com/yebekhe/TelegramV2rayCollector/master/sub/normal/v2ray",
+    "https://raw.githubusercontent.com/ermaozi/get_subscribe/main/subscribe/v2ray.txt",
+    "https://raw.githubusercontent.com/freefq/free/master/v2"
 ]
 
 GPT_TEST_URL = "https://api.openai.com/v1/models"
 
-async def test_gpt_access(proxy_url):
-    try:
-        conn = aiohttp.ProxyConnector.from_url(proxy_url)
-        async with aiohttp.ClientSession(connector=conn) as session:
-            async with session.get(GPT_TEST_URL, timeout=6) as resp:
-                return resp.status in [200, 401]
-    except Exception as e:
-        return False
-
+# 解码 vmess base64 内容
 def decode_base64(data):
     data += '=' * (4 - len(data) % 4)
     return base64.b64decode(data).decode('utf-8', errors='ignore')
 
+# 提取 vmess:// 链接
 def extract_vmess_links(text):
     return re.findall(r'vmess://[a-zA-Z0-9+/=]+', text)
 
+# 自动识别 Base64 或明文格式
+def smart_decode_links(text):
+    try:
+        decoded = decode_base64(text)
+        return extract_vmess_links(decoded)
+    except:
+        return extract_vmess_links(text)
+
+# 测试 GPT 接口可达性（使用代理）
+async def test_gpt_access(proxy_url):
+    try:
+        conn = aiohttp.ProxyConnector.from_url(proxy_url)
+        async with aiohttp.ClientSession(connector=conn) as session:
+            async with session.get(GPT_TEST_URL, timeout=8) as resp:
+                return resp.status in [200, 401]
+    except:
+        return False
+
+# 主流程
 async def main():
     all_nodes = []
     print("📥 开始抓取节点源")
@@ -33,7 +48,7 @@ async def main():
             try:
                 async with session.get(url, timeout=10) as resp:
                     text = await resp.text()
-                    links = extract_vmess_links(text)
+                    links = smart_decode_links(text)
                     print(f"✅ 从 {url} 抓取 {len(links)} 条链接")
                     all_nodes.extend(links)
             except Exception as e:
@@ -70,7 +85,7 @@ async def main():
 
             if len(results) >= 10:
                 break
-        except Exception as e:
+        except Exception:
             continue
 
     if results:
@@ -80,4 +95,5 @@ async def main():
     else:
         print("⚠️ 没有测试通过的节点，未生成 nodes.json")
 
+# 异步运行
 asyncio.run(main())
