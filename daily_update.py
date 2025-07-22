@@ -2,8 +2,9 @@ import json, asyncio, aiohttp, time, base64, re
 from datetime import datetime
 
 SOURCE_URLS = [
-    "https://raw.githubusercontent.com/ermaozi/get_subscribe/main/subscribe/v2ray.txt",
-    "https://raw.githubusercontent.com/freefq/free/master/v2",
+    "https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/sub/splitted/vmess",
+    "https://raw.githubusercontent.com/Leon406/SubCrawler/main/sub/ProxyNode_Subscribe_1.txt",
+    "https://raw.githubusercontent.com/yebekhe/TelegramV2rayCollector/master/sub/normal/v2ray",
 ]
 
 GPT_TEST_URL = "https://api.openai.com/v1/models"
