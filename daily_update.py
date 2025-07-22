@@ -12,9 +12,9 @@ async def test_gpt_access(proxy_url):
     try:
         conn = aiohttp.ProxyConnector.from_url(proxy_url)
         async with aiohttp.ClientSession(connector=conn) as session:
-            async with session.get(GPT_TEST_URL, timeout=8) as resp:
-                return resp.status == 200 or resp.status == 401
-    except:
+            async with session.get(GPT_TEST_URL, timeout=6) as resp:
+                return resp.status in [200, 401]
+    except Exception as e:
         return False
 
 def decode_base64(data):
@@ -26,27 +26,36 @@ def extract_vmess_links(text):
 
 async def main():
     all_nodes = []
-    for url in SOURCE_URLS:
-        try:
-            raw = await aiohttp.ClientSession().get(url)
-            text = await raw.text()
-            all_nodes += extract_vmess_links(text)
-        except:
-            continue
+    print("📥 开始抓取节点源")
+    async with aiohttp.ClientSession() as session:
+        for url in SOURCE_URLS:
+            try:
+                async with session.get(url, timeout=10) as resp:
+                    text = await resp.text()
+                    links = extract_vmess_links(text)
+                    print(f"✅ 从 {url} 抓取 {len(links)} 条链接")
+                    all_nodes.extend(links)
+            except Exception as e:
+                print(f"⚠️ 抓取失败：{url}，原因：{e}")
 
+    print(f"🧪 总共待测试节点数：{len(all_nodes)}")
     results = []
     tested = set()
+
     for link in all_nodes:
         try:
             raw = decode_base64(link.replace("vmess://", ""))
             node = json.loads(raw)
-            addr, port = node['add'], node['port']
-            proxy = f"http://{addr}:{port}"
+            addr = node['add']
+            port = node['port']
             if (addr, port) in tested:
                 continue
             tested.add((addr, port))
+            proxy = f"http://{addr}:{port}"
+
             ok = await test_gpt_access(proxy)
             if ok:
+                print(f"✅ {addr}:{port} 可访问 GPT")
                 results.append({
                     "name": node.get("ps", f"{addr}:{port}"),
                     "protocol": "vmess",
@@ -55,12 +64,19 @@ async def main():
                     "latency_ms": -1,
                     "last_tested": datetime.utcnow().isoformat() + "Z"
                 })
+            else:
+                print(f"❌ {addr}:{port} 无法访问 GPT")
+
             if len(results) >= 10:
                 break
-        except:
+        except Exception as e:
             continue
 
-    with open("nodes.json", "w") as f:
-        json.dump(results, f, indent=2, ensure_ascii=False)
+    if results:
+        with open("nodes.json", "w") as f:
+            json.dump(results, f, indent=2, ensure_ascii=False)
+        print(f"✅ 写入 {len(results)} 条可用节点到 nodes.json")
+    else:
+        print("⚠️ 没有测试通过的节点，未生成 nodes.json")
 
 asyncio.run(main())
