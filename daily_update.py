@@ -1,99 +1,84 @@
-import json, asyncio, aiohttp, base64, re
+import requests, re, base64, json, subprocess
 from datetime import datetime
+from urllib.parse import unquote
+from pathlib import Path
 
-# 📥 节点源列表（支持 base64 或明文）
-SOURCE_URLS = [
-    "https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/sub/splitted/vmess",
-    "https://raw.githubusercontent.com/Leon406/SubCrawler/main/sub/ProxyNode_Subscribe_1.txt",
-    "https://raw.githubusercontent.com/yebekhe/TelegramV2rayCollector/master/sub/normal/v2ray",
-    "https://raw.githubusercontent.com/ermaozi/get_subscribe/main/subscribe/v2ray.txt",
-    "https://raw.githubusercontent.com/freefq/free/master/v2"
+# 要抓取的 Telegram 频道（网页版）
+TELEGRAM_CHANNELS = [
+    "https://t.me/s/GPT_v2ray_daily",
+    "https://t.me/s/free4gpt_node",
+    "https://t.me/s/v2ray_top1",
+    "https://t.me/s/GPTfree4u",
 ]
 
-GPT_TEST_URL = "https://api.openai.com/v1/models"
-
-# 解码 vmess base64 内容
-def decode_base64(data):
-    data += '=' * (4 - len(data) % 4)
-    return base64.b64decode(data).decode('utf-8', errors='ignore')
-
-# 提取 vmess:// 链接
-def extract_vmess_links(text):
-    return re.findall(r'vmess://[a-zA-Z0-9+/=]+', text)
-
-# 自动识别 Base64 或明文格式
-def smart_decode_links(text):
+# 判断节点是否可访问 GPT 接口
+def test_node(node_str: str) -> bool:
     try:
-        decoded = decode_base64(text)
-        return extract_vmess_links(decoded)
-    except:
-        return extract_vmess_links(text)
-
-# 测试 GPT 接口可达性（使用代理）
-async def test_gpt_access(proxy_url):
-    try:
-        conn = aiohttp.ProxyConnector.from_url(proxy_url)
-        async with aiohttp.ClientSession(connector=conn) as session:
-            async with session.get(GPT_TEST_URL, timeout=8) as resp:
-                return resp.status in [200, 401]
-    except:
+        result = subprocess.run(
+            ["./v2ray-test", node_str, "https://api.openai.com/v1/models", "5"],
+            capture_output=True, text=True, timeout=30
+        )
+        return "GPT_ACCESSIBLE" in result.stdout
+    except Exception:
         return False
 
-# 主流程
-async def main():
-    all_nodes = []
-    print("📥 开始抓取节点源")
-    async with aiohttp.ClientSession() as session:
-        for url in SOURCE_URLS:
-            try:
-                async with session.get(url, timeout=10) as resp:
-                    text = await resp.text()
-                    links = smart_decode_links(text)
-                    print(f"✅ 从 {url} 抓取 {len(links)} 条链接")
-                    all_nodes.extend(links)
-            except Exception as e:
-                print(f"⚠️ 抓取失败：{url}，原因：{e}")
+# 提取所有节点链接（支持明文或 Base64 编码）
+def extract_links(html: str):
+    links = set()
+    raw_links = re.findall(r'(vmess|vless|trojan)://[^\s<]+', html, re.IGNORECASE)
+    links.update(raw_links)
 
-    print(f"🧪 总共待测试节点数：{len(all_nodes)}")
-    results = []
-    tested = set()
-
-    for link in all_nodes:
+    # 查找 Base64 块（可能包含多个链接）
+    base64_blocks = re.findall(r'([A-Za-z0-9+/=]{100,})', html)
+    for b64 in base64_blocks:
         try:
-            raw = decode_base64(link.replace("vmess://", ""))
-            node = json.loads(raw)
-            addr = node['add']
-            port = node['port']
-            if (addr, port) in tested:
-                continue
-            tested.add((addr, port))
-            proxy = f"http://{addr}:{port}"
-
-            ok = await test_gpt_access(proxy)
-            if ok:
-                print(f"✅ {addr}:{port} 可访问 GPT")
-                results.append({
-                    "name": node.get("ps", f"{addr}:{port}"),
-                    "protocol": "vmess",
-                    "link": link,
-                    "gpt_accessible": True,
-                    "latency_ms": -1,
-                    "last_tested": datetime.utcnow().isoformat() + "Z"
-                })
-            else:
-                print(f"❌ {addr}:{port} 无法访问 GPT")
-
-            if len(results) >= 10:
-                break
+            decoded = base64.b64decode(b64 + "===").decode(errors="ignore")
+            for l in re.findall(r'(vmess|vless|trojan)://[^\s<]+', decoded, re.IGNORECASE):
+                links.add(l.strip())
         except Exception:
             continue
+    return list(links)
 
-    if results:
-        with open("nodes.json", "w") as f:
-            json.dump(results, f, indent=2, ensure_ascii=False)
-        print(f"✅ 写入 {len(results)} 条可用节点到 nodes.json")
+def fetch_all_links():
+    all_links = []
+    for url in TELEGRAM_CHANNELS:
+        try:
+            print(f"📥 抓取频道：{url}")
+            resp = requests.get(url, timeout=15)
+            resp.encoding = 'utf-8'
+            links = extract_links(resp.text)
+            print(f"✅ 抓取成功，共找到 {len(links)} 条链接")
+            all_links.extend(links)
+        except Exception as e:
+            print(f"❌ 抓取失败：{url} -> {e}")
+    return list(set(all_links))
+
+# 生成最终 JSON 并保存
+def save_nodes_json(nodes: list):
+    timestamp = datetime.utcnow().isoformat()
+    node_objs = [{"url": node, "checked_at": timestamp} for node in nodes]
+    with open("nodes.json", "w", encoding="utf-8") as f:
+        json.dump(node_objs, f, ensure_ascii=False, indent=2)
+    print(f"✅ 已保存 nodes.json，共 {len(nodes)} 条")
+
+# 主执行逻辑
+def main():
+    all_links = fetch_all_links()
+    print(f"🧪 开始测试 {len(all_links)} 条节点的 GPT 可达性")
+    valid_nodes = []
+
+    for i, node in enumerate(all_links):
+        print(f"🔹 测试第 {i+1}/{len(all_links)} 条")
+        if test_node(node):
+            print("✅ 可访问 GPT")
+            valid_nodes.append(node)
+        else:
+            print("❌ 无法访问 GPT")
+
+    if valid_nodes:
+        save_nodes_json(valid_nodes)
     else:
-        print("⚠️ 没有测试通过的节点，未生成 nodes.json")
+        print("⚠️ 本次未发现可用节点，未生成 JSON 文件")
 
-# 异步运行
-asyncio.run(main())
+if __name__ == "__main__":
+    main()
