@@ -1,0 +1,26 @@
+name: Deploy to Oracle
+on:
+  push:
+    branches:
+      - main
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to Oracle via SSH
+        uses: appleboy/ssh-action@v0.1.6
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          port: ${{ secrets.ORACLE_SSH_PORT || '22' }}
+          script: |
+            set -e
+            cd ~/ai_agent_deploy || mkdir -p ~/ai_agent_deploy && cd ~/ai_agent_deploy
+            git init || true
+            git remote remove origin || true
+            git remote add origin https://github.com/${{ github.repository }}
+            git fetch --depth=1 origin main
+            git checkout -f main
+            ./deploy/deploy.sh || true
