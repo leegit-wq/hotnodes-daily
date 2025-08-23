@@ -11,18 +11,11 @@ LLM_API = os.getenv("LLM_API_KEY", "<your-llm-key>")  # 火山引擎/OpenAI 等
 def create_pr(branch_name, message):
     token = os.environ.get("GITHUB_TOKEN")
     repo = os.environ.get("GITHUB_REPOSITORY")
-    # 设置 git 用户信息
-    subprocess.check_call(["git", "config", "user.name", "github-actions[bot]"])
-    subprocess.check_call(["git", "config", "user.email", "github-actions[bot]@users.noreply.github.com"])
-    # 添加、提交
-    subprocess.check_call(["git", "add", "."])
-    subprocess.check_call(["git", "commit", "-m", message])
-    # 推送到带 token 的远程
     subprocess.check_call([
-        "git", "push",
-        f"https://x-access-token:{token}@github.com/{repo}.git",
-        branch_name,
-        "-u"
+    "git", "push",
+    f"https://x-access-token:{token}@github.com/{repo}.git",
+    branch_name,
+    "-u"
     ])
 
 def call_llm(prompt):
